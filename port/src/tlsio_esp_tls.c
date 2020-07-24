@@ -20,7 +20,7 @@
 #include "azure_c_shared_utility/tlsio_options.h"
 // #include "esp_log.h"
 #include "esp_tls.h"
-#include "hsm_def.h"
+#include "secure_element.h"
 
 #include "cryptoauthlib.h"
 #include "mbedtls/atca_mbedtls_wrap.h"
@@ -319,7 +319,7 @@ static int tlsio_esp_tls_open_async(CONCRETE_IO_HANDLE tls_io,
                     {
                         // Note: modified here to pass ATECC608 context as private key
                         mbedtls_pk_context pkey;
-                        if (atca_mbedtls_pk_init(&pkey, IOT_HSM_KID) != 0) {
+                        if (atca_mbedtls_pk_init(&pkey, IOT_SECURE_ELEMENT_KID) != 0) {
                             LogError("Failed to get key from ATCA device.");
                             result = __FAILURE__;
                         } else {
