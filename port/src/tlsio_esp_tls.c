@@ -18,8 +18,23 @@
 #include "azure_c_shared_utility/singlylinkedlist.h"
 #include "azure_c_shared_utility/crt_abstractions.h"
 #include "azure_c_shared_utility/tlsio_options.h"
-
+// #include "esp_log.h"
 #include "esp_tls.h"
+#include "secure_element.h"
+
+#include "cryptoauthlib.h"
+#include "mbedtls/atca_mbedtls_wrap.h"
+
+int atca_mbedtls_ecdh_slot_cb(void) {
+//   ESP_LOGI("tlsio", "atca_mbedtls_ecdh_slot_cb");
+  return 0xFFFF; // TempKey
+}
+
+int atca_mbedtls_ecdh_ioprot_cb(uint8_t secret[32]) {
+//   ESP_LOGI("tlsio", "atca_mbedtls_ecdh_ioprot_cb");
+  memcpy(secret, atca_io_protection_key, 32);
+  return 0;
+}
 
 typedef struct
 {
@@ -302,31 +317,36 @@ static int tlsio_esp_tls_open_async(CONCRETE_IO_HANDLE tls_io,
                     }
                     else
                     {
+                        // Note: modified here to pass ATECC608 context as private key
+                        mbedtls_pk_context pkey;
+                        if (atca_mbedtls_pk_init(&pkey, IOT_SECURE_ELEMENT_KID) != 0) {
+                            LogError("Failed to get key from ATCA device.");
+                            result = __FAILURE__;
+                        } else {
+                            /* Codes_SRS_TLSIO_30_034: [ The tlsio_open shall store the provided on_bytes_received, on_bytes_received_context, on_io_error, on_io_error_context, on_io_open_complete, and on_io_open_complete_context parameters for later use as specified and tested per other line entries in this document. ]*/
+                            tls_io_instance->on_bytes_received = on_bytes_received;
+                            tls_io_instance->on_bytes_received_context = on_bytes_received_context;
 
-                        /* Codes_SRS_TLSIO_30_034: [ The tlsio_open shall store the provided on_bytes_received, on_bytes_received_context, on_io_error, on_io_error_context, on_io_open_complete, and on_io_open_complete_context parameters for later use as specified and tested per other line entries in this document. ]*/
-                        tls_io_instance->on_bytes_received = on_bytes_received;
-                        tls_io_instance->on_bytes_received_context = on_bytes_received_context;
+                            tls_io_instance->on_io_error = on_io_error;
+                            tls_io_instance->on_io_error_context = on_io_error_context;
 
-                        tls_io_instance->on_io_error = on_io_error;
-                        tls_io_instance->on_io_error_context = on_io_error_context;
+                            tls_io_instance->on_open_complete = on_io_open_complete;
+                            tls_io_instance->on_open_complete_context = on_io_open_complete_context;
 
-                        tls_io_instance->on_open_complete = on_io_open_complete;
-                        tls_io_instance->on_open_complete_context = on_io_open_complete_context;
+                            tls_io_instance->esp_tls_cfg.non_block = true;
+                            if (tls_io_instance->options.x509_cert != NULL) {
+                                tls_io_instance->esp_tls_cfg.clientcert_pem_buf = (unsigned char *)tls_io_instance->options.x509_cert;
+                                tls_io_instance->esp_tls_cfg.clientcert_pem_bytes = strlen(tls_io_instance->options.x509_cert) + 1;
+                                tls_io_instance->esp_tls_cfg.clientkey = pkey;
+                            }
+                            if (tls_io_instance->options.trusted_certs != NULL) {
+                                tls_io_instance->esp_tls_cfg.cacert_pem_buf = (unsigned char *)tls_io_instance->options.trusted_certs;
+                                tls_io_instance->esp_tls_cfg.cacert_pem_bytes = strlen(tls_io_instance->options.trusted_certs) + 1;
+                            }
 
-                        tls_io_instance->esp_tls_cfg.non_block = true;
-                        if (tls_io_instance->options.x509_key != NULL && tls_io_instance->options.x509_cert != NULL) {
-                            tls_io_instance->esp_tls_cfg.clientcert_pem_buf = (unsigned char *)tls_io_instance->options.x509_cert;
-                            tls_io_instance->esp_tls_cfg.clientcert_pem_bytes = strlen(tls_io_instance->options.x509_cert) + 1;
-                            tls_io_instance->esp_tls_cfg.clientkey_pem_buf = (unsigned char *)tls_io_instance->options.x509_key;
-                            tls_io_instance->esp_tls_cfg.clientkey_pem_bytes = strlen(tls_io_instance->options.x509_key) + 1;
+                            tls_io_instance->tlsio_state = TLSIO_STATE_INIT;
+                            result = 0;
                         }
-                        if (tls_io_instance->options.trusted_certs != NULL) {
-                            tls_io_instance->esp_tls_cfg.cacert_pem_buf = (unsigned char *)tls_io_instance->options.trusted_certs;
-                            tls_io_instance->esp_tls_cfg.cacert_pem_bytes = strlen(tls_io_instance->options.trusted_certs) + 1;
-                        }
-
-                        tls_io_instance->tlsio_state = TLSIO_STATE_INIT;
-                        result = 0;
                     }
                 }
             }
